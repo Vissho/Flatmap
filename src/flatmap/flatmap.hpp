@@ -1,249 +1,18 @@
 #pragma once
 
 #include <iterator>
+
 #include <iostream>
+
 #include <stdexcept>
+
 #include <map>
+
 #include <unordered_map>
-// #include <functional>
+
 #include <limits.h>
 
 namespace fox {
-
-    template <class T>
-    class MyVector {
-    private:
-        T* arr;
-        size_t current_capacity;
-        size_t current_size;
-
-    public:
-        typedef T* iterator;
-        typedef const T* const_iterator;
-
-        iterator begin()
-        {
-            return arr;
-        }
-        iterator end()
-        {
-            return arr + current_size;
-        }
-        const_iterator cbegin() const
-        {
-            return arr;
-        }
-        const_iterator cend() const
-        {
-            return arr + current_size;
-        }
-
-        MyVector() : arr(nullptr), current_capacity(0), current_size(0)
-        {
-        }
-
-        explicit MyVector(size_t size)
-            : arr(new T[size]), current_capacity(size), current_size(size)
-        {
-        }
-
-        MyVector(const MyVector& other)
-            : arr(new T[other.current_capacity]),
-              current_capacity(other.current_capacity),
-              current_size(other.current_size)
-        {
-            for (size_t i = 0; i < current_size; ++i) {
-                arr[i] = other.arr[i];
-            }
-        }
-
-        MyVector& operator=(const MyVector& other)
-        {
-            if (this != &other) {
-                delete[] arr;
-                arr = new T[other.current_capacity];
-                current_capacity = other.current_capacity;
-                current_size = other.current_size;
-                for (size_t i = 0; i < current_size; ++i) {
-                    arr[i] = other.arr[i];
-                }
-            }
-            return *this;
-        }
-
-        MyVector(MyVector&& other)
-            : arr(other.arr),
-              current_capacity(other.current_capacity),
-              current_size(other.current_size)
-        {
-            other.arr = nullptr;
-            other.current_capacity = 0;
-            other.current_size = 0;
-        }
-
-        MyVector& operator=(MyVector&& other)
-        {
-            if (this != &other) {
-                delete[] arr;
-                arr = other.arr;
-                current_capacity = other.current_capacity;
-                current_size = other.current_size;
-                other.arr = nullptr;
-                other.current_capacity = 0;
-                other.current_size = 0;
-            }
-            return *this;
-        }
-
-        ~MyVector()
-        {
-            delete[] arr;
-        }
-
-        void push_back(const T& value)
-        {
-            if (current_size >= current_capacity) {
-                size_t new_capacity
-                        = current_capacity == 0 ? 1 : current_capacity * 2;
-                reserve(new_capacity);
-            }
-            for (int i = current_size + 1; i > 1; --i) {
-                if (std::less<T>{}(arr[i - 1], value)) {
-                    arr[i] = value;
-                    current_size++;
-                    break;
-                } else {
-                    arr[i] = std::move(arr[i - 1]);
-                    if (i == 1) {
-                        arr[0] = value;
-                        current_size++;
-                        break;
-                    }
-                }
-            }
-        }
-
-        void pop_back()
-        {
-            if (current_size > 0) {
-                --current_size;
-            } else {
-                throw std::out_of_range("pop_back called on an empty vector");
-            }
-        }
-
-        T& at(size_t index)
-        {
-            if (index < current_size) {
-                return arr[index];
-            } else {
-                throw std::out_of_range("index out of range");
-            }
-        }
-
-        size_t size() const
-        {
-            return current_size;
-        }
-
-        size_t capacity() const
-        {
-            return current_capacity;
-        }
-
-        void reserve(size_t new_capacity)
-        {
-            if (new_capacity > current_capacity) {
-                T* new_arr = new T[new_capacity];
-                for (size_t i = 0; i < current_size; ++i) {
-                    new_arr[i] = std::move(arr[i]);
-                }
-                current_capacity = new_capacity;
-                delete[] arr;
-                arr = new_arr;
-            }
-        }
-
-        const T& operator[](size_t index) const
-        {
-            if (index < current_size) {
-                return arr[index];
-            } else {
-                throw std::out_of_range("index out of range");
-            }
-        }
-
-        const T& front() const
-        {
-            if (current_size > 0) {
-                return arr[0];
-            } else {
-                throw std::out_of_range("front called on an empty vector");
-            }
-        }
-
-        const T& back() const
-        {
-            if (current_size > 0) {
-                return arr[current_size - 1];
-            } else {
-                throw std::out_of_range("back called on an empty vector");
-            }
-        }
-
-        void clear()
-        {
-            current_size = 0;
-        }
-
-        void swap(MyVector& other)
-        {
-            std::swap(arr, other.arr);
-            std::swap(current_capacity, other.current_capacity);
-            std::swap(current_size, other.current_size);
-        }
-
-        T* data()
-        {
-            return arr;
-        }
-
-        bool empty() const
-        {
-            return current_size == 0;
-        }
-
-        void insert(size_t index, const T& value)
-        {
-            if (index < current_size) {
-                arr[index] = value;
-            } else {
-                throw std::out_of_range("index out of range");
-            }
-        }
-
-        void erase(size_t index)
-        {
-            if (index < current_size) {
-                for (size_t i = index; i < current_size - 1; ++i) {
-                    arr[i] = std::move(arr[i + 1]);
-                }
-                --current_size;
-            } else {
-                throw std::out_of_range("index out of range");
-            }
-        }
-
-        size_t find(const T& value) const
-        {
-            for (size_t i = 0; i < current_size; ++i) {
-                if (arr[i] == value) {
-                    return i;
-                }
-            }
-            return -1;
-        }
-    };
 
     template <class Key, class T>
     class FlatMap {
@@ -342,7 +111,7 @@ namespace fox {
         FlatMap() = default;
 
         FlatMap(size_t size)
-            : keys(new Key[size]), values(new T[size]), capacity(size), size(0)
+            : keys(new Key[size]), values(new T[size]), capacity(size)
         {
         }
 
@@ -373,22 +142,47 @@ namespace fox {
             delete[] values;
         }
 
-        // FlatMap(const FlatMap<Key, T, Compare>& other) :
-        //
-        // {
-        // }
+        FlatMap(const FlatMap& other)
+        {
+            for (const auto& [key, value] : other) {
+                insert(key, value);
+            }
+        }
 
-        // FlatMap& oerator= (const FlatMap& other)
-        // {
-        // }
+        FlatMap& operator=(const FlatMap& other)
+        {
+            if (this != &other) {
+                for (const auto& [key, value] : other) {
+                    insert(key, value);
+                }
+                return *this;
+            }
+        }
 
-        // FlatMap(FlatMap&& other) :
-        // {
-        // }
+        FlatMap(FlatMap&& other) noexcept
+            : keys(other.keys),
+              values(other.values),
+              capacity(other.capacity),
+              size(other.size)
+        {
+            other.keys = nullptr;
+            other.values = nullptr;
+            other.capacity = 0;
+            other.size = 0;
+        }
 
-        // FlatMap& oerator= (FlatMap && other)
-        // {
-        // }
+        FlatMap& operator=(FlatMap&& other) noexcept
+        {
+            keys = other.keys;
+            values = other.values;
+            capacity = other.capacity;
+            size = other.size;
+            other.keys = nullptr;
+            other.values = nullptr;
+            other.capacity = 0;
+            other.size = 0;
+            return *this;
+        }
 
         Iterator<Key, T> begin() const
         {
