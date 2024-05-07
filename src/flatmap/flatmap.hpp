@@ -6,309 +6,453 @@
 
 #include <stdexcept>
 
-#include <map>
+#include <new>
 
-#include <unordered_map>
-
-#include <limits.h>
+#include <algorithm>
 
 namespace fox {
 
-    template <class Key, class T>
+    template <class Key, class T, class Compare = std::less<Key>>
     class FlatMap {
     public:
-        using key_type = Key;
+        using key_type = const Key;
         using mapped_type = T;
         using value_type = std::pair<key_type, mapped_type>;
-        using reference = std::pair<const key_type&, mapped_type&>;
-        using const_reference = std::pair<const key_type&, const mapped_type&>;
+        using reference = value_type&;
+        using const_reference = std::pair<key_type, const mapped_type>&;
         using size_type = size_t;
         using difference_type = ptrdiff_t;
 
     private:
-        Key* keys = nullptr;
-        T* values = nullptr;
-        size_t capacity = 0;
-        size_t size = 0;
+        value_type* data_ = nullptr;
+        size_t capacity_ = 0;
+        size_t size_ = 0;
+        Compare compare_;
 
     public:
         template <class K, class V>
         class Iterator {
-        private:
-            K* keys = nullptr;
-            V* values = nullptr;
-            size_t size = 0;
-            size_t it = 0;
-
         public:
-            using iterator_category = std::bidirectional_iterator_tag;
+            using iterator_category = std::random_access_iterator_tag;
             using value_type = std::pair<const K, V>;
             using difference_type = std::ptrdiff_t;
-            using pointer = std::pair<const K*, V*>;
-            using reference = std::pair<const K&, V&>;
+            using pointer = value_type*;
+            using reference = value_type&;
 
-            Iterator(Key* ikeys, T* ivalues, size_t isize, size_t iter)
-                : keys(ikeys), values(ivalues), size(isize), it(iter)
+            Iterator(pointer data) : data_(data)
             {
             }
 
-            value_type operator*()
+            reference operator*()
             {
-                return std::make_pair(keys[it], values[it]);
+                return *data_;
+            }
+
+            pointer operator->()
+            {
+                return data_;
             }
 
             Iterator& operator++()
             {
-                ++it;
-                if (it == ULLONG_MAX) {
-                    throw(std::out_of_range("Iterator out of range"));
-                }
+                ++data_;
                 return *this;
             }
 
             Iterator operator++(int)
             {
-                Iterator tmp = *this;
-                ++it;
-                if (it == ULLONG_MAX) {
-                    throw(std::out_of_range("Iterator out of range"));
-                }
-                return tmp;
+                Iterator oldValue = *this;
+                ++data_;
+                return oldValue;
             }
 
             Iterator& operator--()
             {
-                --it;
-                if (it < 0) {
-                    throw(std::out_of_range("Iterator out of range"));
-                }
+                --data_;
                 return *this;
             }
 
             Iterator operator--(int)
             {
-                Iterator tmp = *this;
-                --it;
-                if (it < 0) {
-                    throw(std::out_of_range("Iterator out of range"));
-                }
-                return tmp;
+                Iterator oldValue = *this;
+                --data_;
+                return oldValue;
+            }
+
+            Iterator operator+(difference_type n) const
+            {
+                return Iterator(data_ + n);
+            }
+
+            Iterator operator-(difference_type n) const
+            {
+                return Iterator(data_ - n);
+            }
+
+            difference_type operator-(Iterator other) const
+            {
+                return data_ - other.data_;
+            }
+
+            Iterator& operator+=(difference_type n)
+            {
+                data_ += n;
+                return *this;
+            }
+
+            Iterator& operator-=(difference_type n)
+            {
+                data_ -= n;
+                return *this;
+            }
+
+            reference operator[](difference_type n) const
+            {
+                return *(data_ + n);
             }
 
             friend bool operator==(const Iterator& lhs, const Iterator& rhs)
             {
-                return (lhs.it == rhs.it && lhs.size == rhs.size
-                        && lhs.keys == rhs.keys && lhs.values == rhs.values);
+                return (lhs.data_ == rhs.data_);
             }
 
             friend bool operator!=(const Iterator& lhs, const Iterator& rhs)
             {
-                return (lhs.it != rhs.it && lhs.size != rhs.size
-                        && lhs.keys != rhs.keys && lhs.values != rhs.values);
+                return (lhs.data_ != rhs.data_);
             }
+
+            friend bool operator<(const Iterator& lhs, const Iterator& rhs)
+            {
+                return (lhs.data_ < rhs.data_);
+            }
+            friend bool operator>(const Iterator& lhs, const Iterator& rhs)
+            {
+                return (lhs.data_ > rhs.data_);
+            }
+            friend bool operator<=(const Iterator& lhs, const Iterator& rhs)
+            {
+                return (lhs.data_ <= rhs.data_);
+            }
+            friend bool operator>=(const Iterator& lhs, const Iterator& rhs)
+            {
+                return (lhs.data_ >= rhs.data_);
+            }
+
+        private:
+            pointer data_ = nullptr;
         };
 
         FlatMap() = default;
 
-        FlatMap(size_t size)
-            : keys(new Key[size]), values(new T[size]), capacity(size)
+        FlatMap(size_t size) : capacity_(size), data_(nullptr), compare_()
         {
-        }
-
-        FlatMap(std::map<Key, T> map) : FlatMap(map.size())
-        {
-            for (const auto& [key, value] : map) {
-                insert(key, value);
+            if (size > 0) {
+                data_ = static_cast<value_type*>(
+                        ::operator new(size * sizeof(value_type)));
             }
         }
 
-        FlatMap(std::unordered_map<Key, T> map) : FlatMap(map.size())
+        template <typename InputIt>
+        FlatMap(InputIt begin, InputIt end)
+            : data_(nullptr), capacity_(std::distance(begin, end)), compare_()
         {
-            for (const auto& [key, value] : map) {
-                insert(key, value);
-            }
-        }
+            if (capacity_ > 0) {
+                data_ = static_cast<value_type*>(
+                        ::operator new(capacity_ * sizeof(value_type)));
 
-        FlatMap(std::initializer_list<value_type> list) : FlatMap(list.size())
-        {
-            for (const auto& [key, value] : list) {
-                insert(key, value);
+                size_t index = 0;
+                try {
+                    for (auto it = begin; it != end; ++it, ++index) {
+                        new (&data_[index]) value_type(*it);
+                    }
+                } catch (const std::exception& e) {
+                    for (size_t i = 0; i < size_; ++i) {
+                        data_[i].~value_type();
+                    }
+                    delete[] data_;
+
+                    std::cerr << e.what() << '\n';
+                    throw std::out_of_range("FlatMap: out of range");
+                }
+
+                std::sort(
+                        data_,
+                        data_ + capacity_,
+                        [this](const_reference lhs, const_reference rhs) {
+                            return compare_(lhs.first, rhs.first);
+                        });
             }
         }
 
         ~FlatMap()
         {
-            delete[] keys;
-            delete[] values;
+            for (size_t i = 0; i < size_; ++i) {
+                data_[i].~value_type();
+            }
+            delete[] data_;
         }
 
         FlatMap(const FlatMap& other)
+            : data_(new value_type[other.size_]),
+              size_(other.size_),
+              capacity_(other.size_)
         {
-            for (const auto& [key, value] : other) {
-                insert(key, value);
-            }
+            std::copy(other.data_, other.data_ + other.size_, data_);
         }
 
         FlatMap& operator=(const FlatMap& other)
         {
             if (this != &other) {
-                for (const auto& [key, value] : other) {
-                    insert(key, value);
-                }
-                return *this;
+                FlatMap temp(other);
+                std::swap(data_, temp.data_);
+                std::swap(size_, temp.size_);
+                std::swap(capacity_, temp.capacity_);
             }
+            return *this;
         }
 
         FlatMap(FlatMap&& other) noexcept
-            : keys(other.keys),
-              values(other.values),
-              capacity(other.capacity),
-              size(other.size)
+            : data_(other.data_), capacity_(other.capacity_), size_(other.size_)
         {
-            other.keys = nullptr;
-            other.values = nullptr;
-            other.capacity = 0;
-            other.size = 0;
+            other.data_ = nullptr;
+            other.capacity_ = 0;
+            other.size_ = 0;
         }
 
         FlatMap& operator=(FlatMap&& other) noexcept
         {
-            keys = other.keys;
-            values = other.values;
-            capacity = other.capacity;
-            size = other.size;
-            other.keys = nullptr;
-            other.values = nullptr;
-            other.capacity = 0;
-            other.size = 0;
+            if (this != &other) {
+                delete[] data_;
+                data_ = other.data_;
+                size_ = other.size_;
+                capacity_ = other.capacity_;
+
+                other.data_ = nullptr;
+                other.size_ = 0;
+                other.capacity_ = 0;
+            }
             return *this;
         }
 
-        Iterator<Key, T> begin() const
+        using iterator = Iterator<key_type, mapped_type>;
+        using const_iterator = Iterator<key_type, const mapped_type>;
+        using reverse_iterator = std::reverse_iterator<iterator>;
+        using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+        iterator begin() const
         {
-            return Iterator<Key, T>(keys, values, size, 0);
+            return iterator(data_);
         }
-        Iterator<Key, T> end() const
+        iterator end() const
         {
-            return Iterator<Key, T>(keys, values, size, size);
+            return iterator(data_ + size_);
         }
-        Iterator<const Key, T> cbegin() const
+        const_iterator cbegin() const
         {
-            return Iterator<const Key, T>(keys, values, size, 0);
+            return const_iterator(data_);
         }
-        Iterator<const Key, T> cend() const
+        const_iterator cend() const
         {
-            return Iterator<const Key, T>(keys, values, size, size);
+            return const_iterator(data_ + size_);
         }
 
-        Iterator<Key, T> rbegin() const
+        reverse_iterator rbegin() const
         {
-            return std::reverse_iterator<Iterator<Key, T>>(
-                    keys, values, size, size);
+            return reverse_iterator(data_ + size_);
         }
-        Iterator<Key, T> rend() const
+        reverse_iterator rend() const
         {
-            return std::reverse_iterator<Iterator<Key, T>>(
-                    keys, values, size, 0);
+            return reverse_iterator(data_);
         }
 
-        Iterator<const Key, T> crbegin() const
+        const_reverse_iterator crbegin() const
         {
-            return std::reverse_iterator<Iterator<const Key, T>>(
-                    keys, values, size, size);
+            return const_reverse_iterator(data_ + size_);
         }
-        Iterator<const Key, T> crend() const
+        const_reverse_iterator crend() const
         {
-            return std::reverse_iterator<Iterator<const Key, T>>(
-                    keys, values, size, 0);
+            return const_reverse_iterator(data_);
         }
 
-        Iterator<const Key, T> operator[](const Key& key)
+        T& operator[](const Key& key)
         {
-            return find(key);
+            auto iter = std::lower_bound(
+                    begin(),
+                    end(),
+                    key,
+                    [this](const value_type& element, const Key& key) {
+                        return compare_(element.first, key);
+                    });
+
+            if (iter != end() && !(compare_(key, iter->first))) {
+                return iter->second;
+            }
+
+            if (size_ >= capacity_) {
+                resize(capacity_ * 2);
+            }
+
+            auto* newData = static_cast<value_type*>(
+                    ::operator new((size_ + 1) * sizeof(value_type)));
+
+            std::uninitialized_copy(begin(), iter, newData);
+
+            new (newData + (iter - data_)) value_type(key, T());
+
+            std::uninitialized_copy(iter, end(), newData + (iter - data_) + 1);
+
+            for (size_t i = 0; i < size_; ++i) {
+                data_[i].~value_type();
+            }
+            delete[] data_;
+
+            ++size_;
+            data_ = newData;
+
+            return newData[iter - data_].second;
         }
 
-        Iterator<const Key, T> at(const Key& key)
+        T& at(const Key& key)
         {
-            return find(key);
+            auto iter = find(key);
+            if (iter == cend()) {
+                throw(std::out_of_range("Key not found"));
+            }
+            return iter.second;
         }
 
         bool empty() const
         {
-            return size == 0;
+            return size_ == 0;
         }
 
         void insert(const Key& key, const T& value)
         {
-            if (size + 1 >= capacity) {
-                resize(capacity * 2);
+            auto iter = std::lower_bound(
+                    begin(),
+                    end(),
+                    key,
+                    [this](const value_type& element, const Key& key) {
+                        return compare_(element.first, key);
+                    });
+
+            if (iter != end() && !(compare_(key, iter->first))) {
+                throw(std::invalid_argument("Key already exists"));
             }
 
-            keys[size] = key;
-            values[size] = value;
-            size++;
+            if (size_ >= capacity_) {
+                resize(capacity_ * 2);
+            }
 
-            // for (size_t i = size - 1; i > 0; --i) {
-            // if (std::less<Key>{}(keys[i], key)) {
-            // keys[i + 1] = key;
-            // values[i + 1] = value;
-            // size++;
-            // break;
-            // } else {
-            // keys[i] = std::move(keys[i + 1]);
-            // values[i] = std::move(values[i + 1]);
-            // if (i == 0) {
-            // keys[0] = key;
-            // values[0] = value;
-            // size++;
-            // break;
-            // }
-            // }
-            // }
+            auto* newData = static_cast<value_type*>(
+                    ::operator new((size_ + 1) * sizeof(value_type)));
+
+            const size_t insertIndex = iter - data_;
+
+            for (size_t i = 0; i < insertIndex; ++i) {
+                new (&newData[i]) value_type(std::move(data_[i]));
+            }
+
+            new (&newData[insertIndex]) value_type(key, value);
+
+            for (size_t i = insertIndex; i < size_; ++i) {
+                new (&newData[i + 1]) value_type(std::move(data_[i]));
+            }
+
+            for (size_t i = 0; i < size_; ++i) {
+                data_[i].~value_type();
+            }
+            delete[] data_;
+
+            ++size_;
+            data_ = newData;
         }
 
         void insert_or_assign(const Key& key, const T& value)
         {
-            if (contains(key)) {
-                for (size_t i = 0; i < size; ++i) {
-                    if (keys[i] == key) {
-                        values[i] = value;
-                        break;
-                    }
-                }
+            auto iter = std::lower_bound(begin(), end(), key, compare_);
+            if (iter != end() && !compare_(key, iter->first)) {
+                iter->second = value;
             } else {
-                insert(key, value);
-            }
-        }
-
-        void erase(size_t index)
-        {
-            if (index < size) {
-                for (size_t i = index; i < size - 1; ++i) {
-                    keys[i] = std::move(keys[i + 1]);
-                    values[i] = std::move(values[i + 1]);
+                if (size_ >= capacity_) {
+                    resize(capacity_ * 2);
                 }
-                --size;
-            } else {
-                throw std::out_of_range("index out of range");
-            }
-        }
 
-        void erase(const Key& key)
-        {
-            for (size_t i = 0; i < size; ++i) {
-                if (keys[i] == key) {
-                    erase(i);
-                    break;
+                auto* newData = static_cast<value_type*>(
+                        ::operator new((size_ + 1) * sizeof(value_type)));
+
+                std::uninitialized_copy(begin(), iter, newData);
+
+                new (newData + (iter - data_)) value_type(key, value);
+
+                std::uninitialized_copy(
+                        iter, end(), newData + (iter - data_) + 1);
+
+                for (size_t i = 0; i < size_; ++i) {
+                    data_[i].~value_type();
                 }
+                delete[] data_;
+
+                ++size_;
+                data_ = newData;
             }
         }
 
-        Iterator<const Key, T> find(const Key& key)
+        bool erase(const Key& key)
         {
-            for (size_t i = 0; i < size; ++i) {
-                if (keys[i] == key) {
-                    return Iterator<const Key, T>(keys, values, size, i);
+            auto iter = std::lower_bound(
+                    begin(),
+                    end(),
+                    key,
+                    [this](const value_type& element, const Key& key) {
+                        return compare_(element.first, key);
+                    });
+
+            if (iter != end() && !(compare_(key, iter->first))) {
+                std::move(iter + 1, end(), iter);
+                --size_;
+                data_[size_].~value_type();
+                return true;
+            }
+
+            return false;
+        }
+
+        iterator erase(iterator pos)
+        {
+            if (pos >= begin() && pos < end()) {
+                std::move(pos + 1, end(), pos);
+                --size_;
+                data_[size_].~value_type();
+                return pos;
+            }
+
+            return end();
+        }
+
+        iterator erase(iterator first, iterator last)
+        {
+            if (first >= begin() && last <= end() && first <= last) {
+                difference_type range = std::distance(first, last);
+                std::move(last, end(), first);
+
+                while (range > 0) {
+                    --size_;
+                    data_[size_].~value_type();
+                    --range;
+                }
+
+                return first;
+            }
+
+            return end();
+        }
+
+        iterator find(const Key& key)
+        {
+            for (size_t i = 0; i < size_; ++i) {
+                if (data_[i].first == key) {
+                    return iterator(data_, size_, i);
                 }
             }
             return cend();
@@ -321,22 +465,20 @@ namespace fox {
 
         void resize(size_t new_capacity)
         {
-            Key* new_keys = new Key[new_capacity];
-            T* new_values = new T[new_capacity];
-            for (size_t i = 0; i < size; ++i) {
-                new_keys[i] = std::move(keys[i]);
-                new_values[i] = std::move(values[i]);
+            auto* new_data = new value_type[new_capacity];
+
+            for (size_t i = 0; i < size_; ++i) {
+                new (new_data + i) value_type(std::move(data_[i]));
             }
-            capacity = new_capacity;
-            delete[] keys;
-            delete[] values;
-            keys = new_keys;
-            values = new_values;
+            capacity_ = new_capacity;
+            delete[] data_;
+            data_ = new_data;
         }
     };
 
     // template <class Key, class T>
-    // std::ostream& operator<<(std::ostream& stream, FlatMap<Key, T> FlatMap)
+    // std::ostream& operator<<(std::ostream& stream, FlatMap<Key, T>
+    // FlatMap)
     // {
     //     for (const auto& [key, value] : FlatMap) {
     //         stream << key << ' ' << value << '\n';

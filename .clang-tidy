@@ -22,7 +22,8 @@ Checks: >
   -google-runtime-int,
   -google-build-using-namespace,
   -cppcoreguidelines-pro-bounds-constant-array-index,
-  -hicpp-signed-bitwise
+  -hicpp-signed-bitwise,
+  -cert-dcl21-cpp
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(flatmap)/'
 AnalyzeTemporaryDtors: false
