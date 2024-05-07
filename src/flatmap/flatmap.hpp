@@ -295,11 +295,17 @@ namespace fox {
             auto* newData = static_cast<value_type*>(
                     ::operator new((size_ + 1) * sizeof(value_type)));
 
-            std::uninitialized_copy(begin(), iter, newData);
+            const size_t insertIndex = iter - data_;
 
-            new (newData + (iter - data_)) value_type(key, T());
+            for (size_t i = 0; i < insertIndex; ++i) {
+                new (&newData[i]) value_type(std::move(data_[i]));
+            }
 
-            std::uninitialized_copy(iter, end(), newData + (iter - data_) + 1);
+            new (&newData[insertIndex]) value_type(key, T());
+
+            for (size_t i = insertIndex; i < size_; ++i) {
+                new (&newData[i + 1]) value_type(std::move(data_[i]));
+            }
 
             for (size_t i = 0; i < size_; ++i) {
                 data_[i].~value_type();
@@ -381,12 +387,17 @@ namespace fox {
                 auto* newData = static_cast<value_type*>(
                         ::operator new((size_ + 1) * sizeof(value_type)));
 
-                std::uninitialized_copy(begin(), iter, newData);
+                const size_t insertIndex = iter - data_;
 
-                new (newData + (iter - data_)) value_type(key, value);
+                for (size_t i = 0; i < insertIndex; ++i) {
+                    new (&newData[i]) value_type(std::move(data_[i]));
+                }
 
-                std::uninitialized_copy(
-                        iter, end(), newData + (iter - data_) + 1);
+                new (&newData[insertIndex]) value_type(key, value);
+
+                for (size_t i = insertIndex; i < size_; ++i) {
+                    new (&newData[i + 1]) value_type(std::move(data_[i]));
+                }
 
                 for (size_t i = 0; i < size_; ++i) {
                     data_[i].~value_type();
