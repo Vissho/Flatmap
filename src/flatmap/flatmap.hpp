@@ -10,6 +10,8 @@
 
 #include <algorithm>
 
+#include <initializer_list>
+
 namespace fox {
 
     template <class Key, class T, class Compare = std::less<Key>>
@@ -24,7 +26,6 @@ namespace fox {
 
     private:
         value_type* data_ = nullptr;
-        size_t capacity_ = 0;
         size_t size_ = 0;
         Compare compare_;
 
@@ -33,7 +34,7 @@ namespace fox {
         class Iterator {
         public:
             using iterator_category = std::random_access_iterator_tag;
-            using value_type = std::pair<const K, V>;
+            using value_type = std::pair<K, V>;
             using difference_type = std::ptrdiff_t;
             using pointer = value_type*;
             using reference = value_type&;
@@ -143,7 +144,7 @@ namespace fox {
 
         FlatMap() = default;
 
-        FlatMap(size_t size) : capacity_(size), data_(nullptr), compare_()
+        FlatMap(size_t size) : data_(nullptr), compare_()
         {
             if (size > 0) {
                 data_ = static_cast<value_type*>(
@@ -152,15 +153,39 @@ namespace fox {
         }
 
         template <typename InputIt>
-        FlatMap(InputIt begin, InputIt end)
-            : data_(nullptr), capacity_(std::distance(begin, end)), compare_()
+        FlatMap(InputIt begin, InputIt end) : data_(nullptr), compare_()
         {
-            if (capacity_ > 0) {
+            const size_t dist = std::distance(begin, end);
+            if (dist > 0) {
                 data_ = static_cast<value_type*>(
-                        ::operator new(capacity_ * sizeof(value_type)));
+                        ::operator new(dist * sizeof(value_type)));
 
                 try {
                     for (auto iter = begin; iter != end; ++iter) {
+                        insert(iter->first, iter->second);
+                    }
+                } catch (const std::exception& e) {
+                    for (size_t i = 0; i < size_; ++i) {
+                        data_[i].~value_type();
+                    }
+                    ::operator delete(data_);
+
+                    std::cerr << e.what() << '\n';
+                    throw std::out_of_range("FlatMap: out of range");
+                }
+            }
+        }
+
+        FlatMap(std::initializer_list<value_type> list)
+            : data_(nullptr), compare_()
+        {
+            const size_t dist = list.size();
+            if (dist > 0) {
+                data_ = static_cast<value_type*>(
+                        ::operator new(dist * sizeof(value_type)));
+
+                try {
+                    for (auto iter = list.begin(); iter != list.end(); ++iter) {
                         insert(iter->first, iter->second);
                     }
                 } catch (const std::exception& e) {
@@ -188,12 +213,8 @@ namespace fox {
         FlatMap(const FlatMap& other)
             : data_(static_cast<value_type*>(
                     ::operator new(other.size_ * sizeof(value_type)))),
-              size_(other.size_),
-              capacity_(other.size_)
+              size_(other.size_)
         {
-            data_ = static_cast<value_type*>(
-                    ::operator new(size_ * sizeof(value_type)));
-
             for (size_t i = 0; i < size_; ++i) {
                 new (&data_[i]) value_type(other.data_[i]);
             }
@@ -205,16 +226,14 @@ namespace fox {
                 FlatMap temp(other);
                 std::swap(data_, temp.data_);
                 std::swap(size_, temp.size_);
-                std::swap(capacity_, temp.capacity_);
             }
             return *this;
         }
 
         FlatMap(FlatMap&& other) noexcept
-            : data_(other.data_), capacity_(other.capacity_), size_(other.size_)
+            : data_(other.data_), size_(other.size_)
         {
             other.data_ = nullptr;
-            other.capacity_ = 0;
             other.size_ = 0;
         }
 
@@ -227,11 +246,9 @@ namespace fox {
                 ::operator delete(data_);
                 data_ = other.data_;
                 size_ = other.size_;
-                capacity_ = other.capacity_;
 
                 other.data_ = nullptr;
                 other.size_ = 0;
-                other.capacity_ = 0;
             }
             return *this;
         }
@@ -278,10 +295,6 @@ namespace fox {
 
         T& operator[](const Key& key)
         {
-            if (size_ == capacity_) {
-                resize(capacity_ == 0 ? 1 : capacity_ * 2);
-            }
-
             auto iter = std::lower_bound(
                     begin(),
                     end(),
@@ -320,26 +333,34 @@ namespace fox {
             ++size_;
             data_ = newData;
 
-            return newData[iter - data_].second;
+            return newData[insertIndex].second;
         }
 
         mapped_type& at(const key_type& key)
         {
-            for (auto iter = begin(); iter != end(); ++iter) {
-                if (iter->first == key) {
-                    return iter->second;
-                }
+            auto iter = find(key);
+
+            if (iter != end()) {
+                return iter->second;
             }
+
             throw std::out_of_range("Key not found in flatmap");
         }
 
         const mapped_type& at(const key_type& key) const
         {
-            for (auto iter = begin(); iter != end(); ++iter) {
-                if (iter->first == key) {
-                    return iter->second;
-                }
+            auto iter = std::lower_bound(
+                    begin(),
+                    end(),
+                    key,
+                    [this](const value_type& element, const Key& key) {
+                        return compare_(element.first, key);
+                    });
+
+            if (iter != end() && !(compare_(key, iter->first))) {
+                return iter->second;
             }
+
             throw std::out_of_range("Key not found in flatmap");
         }
         bool empty() const
@@ -349,10 +370,6 @@ namespace fox {
 
         void insert(const Key& key, const T& value)
         {
-            if (size_ == capacity_) {
-                resize(capacity_ == 0 ? 1 : capacity_ * 2);
-            }
-
             auto iter = std::lower_bound(
                     begin(),
                     end(),
@@ -399,10 +416,6 @@ namespace fox {
 
         void insert_or_assign(const Key& key, const T& value)
         {
-            if (size_ == capacity_) {
-                resize(capacity_ == 0 ? 1 : capacity_ * 2);
-            }
-
             auto iter = std::lower_bound(
                     begin(),
                     end(),
@@ -453,52 +466,50 @@ namespace fox {
                     });
 
             if (iter != end() && !(compare_(key, iter->first))) {
-                std::move(iter + 1, end(), iter);
+                auto* newData = static_cast<value_type*>(
+                        ::operator new((size_ - 1) * sizeof(value_type)));
+
+                const size_t insertIndex = iter - data_;
+
+                for (size_t i = 0; i < insertIndex; ++i) {
+                    new (&newData[i]) value_type(std::move(data_[i]));
+                }
+
+                for (size_t i = insertIndex + 1; i < size_; ++i) {
+                    new (&newData[i - 1]) value_type(std::move(data_[i]));
+                }
+
+                for (size_t i = 0; i < size_; ++i) {
+                    data_[i].~value_type();
+                }
+
+                if (data_ != nullptr) {
+                    ::operator delete(data_);
+                }
+
                 --size_;
-                data_[size_].~value_type();
+                data_ = newData;
+
                 return true;
             }
 
             return false;
         }
 
-        iterator erase(iterator pos)
-        {
-            if (pos >= begin() && pos < end()) {
-                std::move(pos + 1, end(), pos);
-                --size_;
-                data_[size_].~value_type();
-                return pos;
-            }
-
-            return end();
-        }
-
-        iterator erase(iterator first, iterator last)
-        {
-            if (first >= begin() && last <= end() && first <= last) {
-                auto range = std::distance(first, last);
-                std::move(last, end(), first);
-
-                while (range > 0) {
-                    --size_;
-                    data_[size_].~value_type();
-                    --range;
-                }
-
-                return first;
-            }
-
-            return end();
-        }
-
         iterator find(const key_type& key)
         {
-            for(auto iter = begin(); iter != end(); ++iter) {
-                if (compare_(key, iter->first)) {
-                    return iter;
-                }
+            auto iter = std::lower_bound(
+                    begin(),
+                    end(),
+                    key,
+                    [this](const value_type& element, const Key& key) {
+                        return compare_(element.first, key);
+                    });
+
+            if (iter != end() && !(compare_(key, iter->first))) {
+                return iter;
             }
+
             return end();
         }
 
@@ -507,26 +518,15 @@ namespace fox {
             return find(key) != end();
         }
 
-        void resize(size_t new_capacity)
+        size_t size() const
         {
-            auto* new_data = static_cast<value_type*>(
-                    ::operator new(new_capacity * sizeof(value_type)));
-
-            if (data_ != nullptr) {
-                for (size_t i = 0; i < size_; ++i) {
-                    new (&new_data[i]) value_type(std::move(data_[i]));
-                    data_[i].~value_type();
-                }
-                ::operator delete(data_);
-            }
-
-            capacity_ = new_capacity;
-            data_ = new_data;
+            return size_;
         }
     };
 
-    template <typename Stream, typename FlatMap>
-    Stream& operator<<(Stream& stream, const FlatMap& flatMap)
+    template <typename K, typename T, typename Compare>
+    std::ostream&
+    operator<<(std::ostream& stream, const FlatMap<K, T, Compare>& flatMap)
     {
         for (const auto& pair : flatMap) {
             stream << pair.first << ' ' << pair.second << '\n';
